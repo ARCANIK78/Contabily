@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 import { TransaccionesService } from './transacciones.service.js';
+import { MovimientosFinancierosService } from './movimientos-financieros.service.js';
 import { CuentaFinanciera } from '../entities/cuenta-financiera.entity.js';
 
 type MockManager = {
@@ -10,6 +11,8 @@ type MockManager = {
   save: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
 };
+
+const EMPRESA = 'empresa-uuid-1';
 
 describe('TransaccionesService', () => {
   let service: TransaccionesService;
@@ -76,12 +79,19 @@ describe('TransaccionesService', () => {
       obtenerTasaDelDia: vi.fn().mockResolvedValue({ id: 'tc-1', tasa: '11.8500' }),
     };
 
+    // La lógica de saldo/conversión vive en el servicio compartido (sin mock:
+    // se ejercita de verdad sobre el manager simulado).
+    const movimientosFinancieros = new MovimientosFinancierosService(
+      {} as never,
+      tipoCambioService as never,
+    );
+
     service = new TransaccionesService(
       {} as never,
       dataSource as never,
       asientosService as never,
       planCuentasService as never,
-      tipoCambioService as never,
+      movimientosFinancieros as never,
     );
   });
 
@@ -94,7 +104,7 @@ describe('TransaccionesService', () => {
         descripcion: 'Venta de contado',
       };
 
-      const transaccion = await service.registrarIngreso(dto);
+      const transaccion = await service.registrarIngreso(EMPRESA, dto);
 
       expect(transaccion.tipo).toBe('INGRESO');
       expect(manager.update).toHaveBeenCalledWith(
@@ -119,7 +129,7 @@ describe('TransaccionesService', () => {
       });
 
       await expect(
-        service.registrarIngreso({
+        service.registrarIngreso(EMPRESA, {
           cuentaFinancieraId: 'origen',
           monto: 10,
           cuentaContableId: 'cc-gasto',
@@ -132,7 +142,7 @@ describe('TransaccionesService', () => {
       cuentasContablesVinculadas = 1;
 
       await expect(
-        service.registrarIngreso({
+        service.registrarIngreso(EMPRESA, {
           cuentaFinancieraId: 'origen',
           monto: 10,
           cuentaContableId: 'cc-caja-otra',
@@ -144,7 +154,7 @@ describe('TransaccionesService', () => {
 
   describe('registrarEgreso', () => {
     it('resta el saldo y genera el asiento invertido', async () => {
-      const transaccion = await service.registrarEgreso({
+      const transaccion = await service.registrarEgreso(EMPRESA, {
         cuentaFinancieraId: 'origen',
         monto: 50,
         cuentaContableId: 'cc-gasto',
@@ -165,7 +175,7 @@ describe('TransaccionesService', () => {
 
     it('rechaza el egreso cuando el saldo es insuficiente', async () => {
       await expect(
-        service.registrarEgreso({
+        service.registrarEgreso(EMPRESA, {
           cuentaFinancieraId: 'origen',
           monto: 5000,
           cuentaContableId: 'cc-gasto',
@@ -179,7 +189,7 @@ describe('TransaccionesService', () => {
       cuentasContablesVinculadas = 1;
 
       await expect(
-        service.registrarEgreso({
+        service.registrarEgreso(EMPRESA, {
           cuentaFinancieraId: 'origen',
           monto: 10,
           cuentaContableId: 'cc-caja-otra',
@@ -192,7 +202,7 @@ describe('TransaccionesService', () => {
       cuentas.origen.activo = false;
 
       await expect(
-        service.registrarEgreso({
+        service.registrarEgreso(EMPRESA, {
           cuentaFinancieraId: 'origen',
           monto: 10,
           cuentaContableId: 'cc-gasto',
@@ -204,7 +214,7 @@ describe('TransaccionesService', () => {
   describe('realizarTransferencia', () => {
     it('rechaza transferir a la misma cuenta', async () => {
       await expect(
-        service.realizarTransferencia({
+        service.realizarTransferencia(EMPRESA, {
           cuentaOrigenId: 'origen',
           cuentaDestinoId: 'origen',
           monto: 10,
@@ -214,7 +224,7 @@ describe('TransaccionesService', () => {
     });
 
     it('resta en el origen, suma en el destino y genera asiento equilibrado', async () => {
-      const transaccion = await service.realizarTransferencia({
+      const transaccion = await service.realizarTransferencia(EMPRESA, {
         cuentaOrigenId: 'origen',
         cuentaDestinoId: 'destino',
         monto: 100,
@@ -235,7 +245,7 @@ describe('TransaccionesService', () => {
 
     it('rechaza la transferencia si el origen no tiene saldo suficiente', async () => {
       await expect(
-        service.realizarTransferencia({
+        service.realizarTransferencia(EMPRESA, {
           cuentaOrigenId: 'origen',
           cuentaDestinoId: 'destino',
           monto: 9999,
@@ -247,7 +257,7 @@ describe('TransaccionesService', () => {
 
   describe('moneda y tipo de cambio', () => {
     it('los movimientos en BOB no consultan el tipo de cambio', async () => {
-      const transaccion = await service.registrarIngreso({
+      const transaccion = await service.registrarIngreso(EMPRESA, {
         cuentaFinancieraId: 'origen',
         monto: 150.5,
         cuentaContableId: 'cc-ingreso',
@@ -261,7 +271,7 @@ describe('TransaccionesService', () => {
     it('un ingreso en USD convierte el asiento a BOB con la tasa del día', async () => {
       cuentas.origen.moneda = 'USD';
 
-      const transaccion = await service.registrarIngreso({
+      const transaccion = await service.registrarIngreso(EMPRESA, {
         cuentaFinancieraId: 'origen',
         monto: 10,
         cuentaContableId: 'cc-ingreso',
@@ -283,7 +293,7 @@ describe('TransaccionesService', () => {
     it('un egreso en USD convierte el asiento a BOB con la tasa del día', async () => {
       cuentas.origen.moneda = 'USD';
 
-      const transaccion = await service.registrarEgreso({
+      const transaccion = await service.registrarEgreso(EMPRESA, {
         cuentaFinancieraId: 'origen',
         monto: 5,
         cuentaContableId: 'cc-gasto',
@@ -303,7 +313,7 @@ describe('TransaccionesService', () => {
       cuentas.destino.moneda = 'USD';
 
       await expect(
-        service.realizarTransferencia({
+        service.realizarTransferencia(EMPRESA, {
           cuentaOrigenId: 'origen',
           cuentaDestinoId: 'destino',
           monto: 10,
@@ -317,7 +327,7 @@ describe('TransaccionesService', () => {
       cuentas.origen.moneda = 'USD';
       cuentas.destino.moneda = 'USD';
 
-      const transaccion = await service.realizarTransferencia({
+      const transaccion = await service.realizarTransferencia(EMPRESA, {
         cuentaOrigenId: 'origen',
         cuentaDestinoId: 'destino',
         monto: 2,
@@ -335,7 +345,7 @@ describe('TransaccionesService', () => {
   describe('bloquearCuenta', () => {
     it('lanza NotFound si la cuenta financiera no existe', async () => {
       await expect(
-        service.registrarIngreso({
+        service.registrarIngreso(EMPRESA, {
           cuentaFinancieraId: 'fantasma',
           monto: 10,
           cuentaContableId: 'cc-ingreso',

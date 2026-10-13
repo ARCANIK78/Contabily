@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -14,6 +15,7 @@ import type { PlanDeCuenta } from '../../contabilidad/entities/plan-de-cuenta.en
 import { PlanDeCuenta as PlanDeCuentaClass } from '../../contabilidad/entities/plan-de-cuenta.entity.js';
 import type { Transaccion } from './transaccion.entity.js';
 import { Transaccion as TransaccionClass } from './transaccion.entity.js';
+import { Empresa } from '../../empresa/entities/empresa.entity.js';
 
 export enum TipoCuentaFinanciera {
   EFECTIVO = 'EFECTIVO',
@@ -21,10 +23,22 @@ export enum TipoCuentaFinanciera {
 }
 
 @Entity('cuentas_financieras')
+@Index(['empresaId'])
 export class CuentaFinanciera {
   @ApiProperty({ description: 'Identificador único de la caja/banco', example: 'uuid-v4' })
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @ApiProperty({
+    description: 'Negocio/empresa dueño de esta caja o banco (aislamiento multi-tenant)',
+    example: 'uuid-v4',
+  })
+  @Column({ type: 'uuid', name: 'empresa_id' })
+  empresaId: string;
+
+  @ManyToOne(() => Empresa, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'empresa_id' })
+  empresa: Empresa;
 
   @ApiProperty({ description: 'Nombre de la cuenta financiera', example: 'Caja Chica' })
   @Column({ type: 'varchar', length: 255, name: 'nombre' })

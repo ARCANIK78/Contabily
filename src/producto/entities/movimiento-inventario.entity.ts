@@ -35,7 +35,7 @@ export enum OrigenMovimiento {
 }
 
 @Entity('movimientos_inventario')
-@Index(['empresaId', 'fecha'])
+@Index(['empresaId', 'creadoEn'])
 @Index(['empresaId', 'productoId'])
 @Index(['empresaId', 'varianteId'])
 @Index(['empresaId', 'tipo'])

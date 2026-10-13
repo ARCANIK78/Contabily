@@ -1,8 +1,7 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, IsEnum, IsArray, ValidateNested, IsUUID, Min, Max, IsUrl, MinLength, MaxLength } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsString, IsNumber, IsBoolean, IsEnum, IsArray, IsUUID, Min, Max, IsUrl, MinLength, MaxLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TipoProducto, EstadoProducto } from '../entities/producto.entity.js';
-import { Moneda } from '../../empresa/entities/empresa.entity.js';
 
 export class CrearProductoDto {
   @ApiProperty({ description: 'SKU único', example: 'CAM-001' })
@@ -480,11 +479,13 @@ export class FiltroProductoDto {
 
   @ApiPropertyOptional({ description: 'Filtrar con stock bajo' })
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   stockBajo?: boolean;
 
   @ApiPropertyOptional({ description: 'Filtrar sin stock' })
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   sinStock?: boolean;
 

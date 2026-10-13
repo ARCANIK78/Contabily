@@ -106,6 +106,20 @@ export class Empresa {
   @Column({ type: 'jsonb', nullable: true })
   configuracion: Record<string, any> | null;
 
+  /**
+   * Contador del último número de asiento contable emitido por este negocio.
+   *
+   * Se incrementa con un UPDATE ... RETURNING dentro de la misma transacción
+   * que crea el asiento: el UPDATE bloquea la fila del tenant, así que dos
+   * asientos simultáneos no pueden leer el mismo MAX y duplicar el correlativo.
+   */
+  @ApiProperty({
+    description: 'Último correlativo de asiento contable emitido por el negocio',
+    default: 0,
+  })
+  @Column({ type: 'integer', name: 'secuencia_asientos', default: 0 })
+  secuenciaAsientos: number;
+
   // Relaciones
   @ApiProperty({ description: 'ID del propietario' })
   @Column({ type: 'uuid' })

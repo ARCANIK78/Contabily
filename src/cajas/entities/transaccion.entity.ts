@@ -12,6 +12,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type { CuentaFinanciera } from './cuenta-financiera.entity.js';
 import { CuentaFinanciera as CuentaFinancieraClass } from './cuenta-financiera.entity.js';
 import { TipoCambio } from '../../tipo-cambio/entities/tipo-cambio.entity.js';
+import { Empresa } from '../../empresa/entities/empresa.entity.js';
 
 export enum TipoTransaccion {
   INGRESO = 'INGRESO',
@@ -21,10 +22,23 @@ export enum TipoTransaccion {
 
 @Entity('transacciones')
 @Index(['cuentaFinancieraId', 'fechaCreacion'])
+@Index(['empresaId', 'fechaCreacion'])
+@Index(['empresaId'])
 export class Transaccion {
   @ApiProperty({ description: 'Identificador único de la transacción', example: 'uuid-v4' })
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @ApiProperty({
+    description: 'Negocio/empresa dueño del movimiento (aislamiento multi-tenant)',
+    example: 'uuid-v4',
+  })
+  @Column({ type: 'uuid', name: 'empresa_id' })
+  empresaId: string;
+
+  @ManyToOne(() => Empresa, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'empresa_id' })
+  empresa: Empresa;
 
   @ApiProperty({ description: 'Caja o banco que ejecutó el movimiento' })
   @Column({ type: 'uuid', name: 'cuenta_financiera_id' })

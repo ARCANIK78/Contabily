@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Between, Like, ILike } from 'typeorm';
+import { EntityManager, Repository, In, Between, Like, ILike } from 'typeorm';
 import { Producto, TipoProducto, EstadoProducto } from './entities/producto.entity.js';
 import { ProductoVariante } from './entities/producto-variante.entity.js';
 import { Categoria } from './entities/categoria.entity.js';
@@ -534,7 +534,7 @@ export class ProductoService {
     }
     return actualizada;
   }
-  }
+  
 
   async generarVariantes(productoId: string, empresaId: string, dto: GenerarVariantesDto): Promise<ProductoVariante[]> {
     const producto = await this.buscarPorId(productoId, empresaId);
@@ -634,14 +634,255 @@ export class ProductoService {
     notas?: string;
     metadatos?: Record<string, any>;
   }): Promise<MovimientoInventario> {
+    return this.registrarMovimientoCon(this.movimientoRepository.manager, data);
+  }
+
+  /**
+   * Registra el movimiento de inventario usando el EntityManager que le pase
+   * el llamador, para que quede dentro de la misma transacción (ej: la compra
+   * que también genera el asiento y descuenta la caja).
+   */
+  private async registrarMovimientoCon(
+    manager: EntityManager,
+    data: {
+      empresaId: string;
+      productoId: string;
+      varianteId?: string;
+      tipo: TipoMovimiento;
+      origen?: OrigenMovimiento;
+      cantidad: number;
+      stockAnterior: number;
+      stockPosterior: number;
+      documentoOrigenId?: string;
+      tipoDocumentoOrigen?: string;
+      costoUnitario?: number;
+      costoTotal?: number;
+      ubicacionOrigen?: string;
+      ubicacionDestino?: string;
+      usuarioId?: string;
+      notas?: string;
+      metadatos?: Record<string, any>;
+    },
+  ): Promise<MovimientoInventario> {
     const numeroReferencia = `MOV-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
 
-    const movimiento = this.movimientoRepository.create({
+    const movimiento = manager.create(MovimientoInventario, {
       numeroReferencia,
       ...data,
     });
 
-    return this.movimientoRepository.save(movimiento);
+    return manager.save(movimiento);
+  }
+
+  /**
+   * Aplica la recepción de una compra al inventario DENTRO de la transacción
+   * de la compra (recibe el EntityManager):
+   *  - sube stock (producto simple o variante),
+   *  - actualiza el costo con política de "último costo",
+   *  - registra el movimiento con origen COMPRA y el id de la compra.
+   *
+   * Las líneas sin producto/variante (ej: flete) no tocan inventario.
+   */
+  async aplicarEntradaCompra(
+    manager: EntityManager,
+    empresaId: string,
+    compraId: string,
+    lineas: Array<{
+      productoId?: string | null;
+      varianteId?: string | null;
+      cantidad: number;
+      costoUnitario: number;
+      descripcion: string;
+    }>,
+  ): Promise<void> {
+    for (const linea of lineas) {
+      if (linea.varianteId) {
+        await this.recibirCompraEnVariante(manager, empresaId, compraId, linea);
+      } else if (linea.productoId) {
+        await this.recibirCompraEnProducto(manager, empresaId, compraId, linea);
+      }
+    }
+  }
+
+  /**
+   * Revierte una entrada por compra (anulación de compra): baja el stock y
+   * registra una salida con origen DEVOLUCION_PROVEEDOR. El costo NO se toca
+   * porque es el último precio efectivamente pagado.
+   */
+  async reversarEntradaCompra(
+    manager: EntityManager,
+    empresaId: string,
+    compraId: string,
+    lineas: Array<{
+      productoId?: string | null;
+      varianteId?: string | null;
+      cantidad: number;
+      costoUnitario: number;
+      descripcion: string;
+    }>,
+  ): Promise<void> {
+    for (const linea of lineas) {
+      if (linea.varianteId) {
+        const variante = await manager.findOne(ProductoVariante, {
+          // La variante no tiene empresa propia: se valida a través de su producto.
+          where: { id: linea.varianteId, producto: { empresaId } },
+        });
+        if (!variante) {
+          throw new NotFoundException(`Variante ${linea.varianteId} no encontrada en este negocio`);
+        }
+        const stockAnterior = variante.stock;
+        const stockPosterior = stockAnterior - linea.cantidad;
+        variante.stock = stockPosterior;
+        await manager.save(variante);
+        await this.sincronizarStockDeProducto(variante.productoId, manager);
+        await this.registrarMovimientoCon(manager, {
+          empresaId,
+          productoId: variante.productoId,
+          varianteId: variante.id,
+          tipo: TipoMovimiento.SALIDA,
+          origen: OrigenMovimiento.DEVOLUCION_PROVEEDOR,
+          cantidad: linea.cantidad,
+          stockAnterior,
+          stockPosterior,
+          documentoOrigenId: compraId,
+          tipoDocumentoOrigen: 'compra',
+          notas: 'Anulación de compra',
+        });
+      } else if (linea.productoId) {
+        const producto = await manager.findOne(Producto, {
+          where: { id: linea.productoId, empresaId },
+        });
+        if (!producto) {
+          throw new NotFoundException(`Producto ${linea.productoId} no encontrado en este negocio`);
+        }
+        if (!producto.rastrearInventario) {
+          continue;
+        }
+        const stockAnterior = producto.stock;
+        const stockPosterior = stockAnterior - linea.cantidad;
+        producto.stock = stockPosterior;
+        await manager.save(producto);
+        await this.registrarMovimientoCon(manager, {
+          empresaId,
+          productoId: producto.id,
+          tipo: TipoMovimiento.SALIDA,
+          origen: OrigenMovimiento.DEVOLUCION_PROVEEDOR,
+          cantidad: linea.cantidad,
+          stockAnterior,
+          stockPosterior,
+          documentoOrigenId: compraId,
+          tipoDocumentoOrigen: 'compra',
+          notas: 'Anulación de compra',
+        });
+      }
+    }
+  }
+
+  private async recibirCompraEnProducto(
+    manager: EntityManager,
+    empresaId: string,
+    compraId: string,
+    linea: {
+      productoId?: string | null;
+      varianteId?: string | null;
+      cantidad: number;
+      costoUnitario: number;
+      descripcion: string;
+    },
+  ): Promise<void> {
+    const producto = await manager.findOne(Producto, {
+      where: { id: linea.productoId!, empresaId },
+    });
+    if (!producto) {
+      throw new NotFoundException(`Producto ${linea.productoId} no encontrado en este negocio`);
+    }
+    // Productos sin rastreo de inventario (servicios, digitales) no mueven stock.
+    if (!producto.rastrearInventario) {
+      this.logger.warn(
+        `Producto ${producto.sku} no rastrea inventario: la línea "${linea.descripcion}" no genera movimiento`,
+      );
+      return;
+    }
+    if (producto.requiereVariantes) {
+      throw new BadRequestException(
+        `El producto ${producto.sku} usa variantes; la línea de compra debe indicar varianteId`,
+      );
+    }
+
+    const stockAnterior = producto.stock;
+    const stockPosterior = stockAnterior + linea.cantidad;
+    producto.stock = stockPosterior;
+    producto.costo = linea.costoUnitario; // política de último costo
+    await manager.save(producto);
+
+    await this.registrarMovimientoCon(manager, {
+      empresaId,
+      productoId: producto.id,
+      tipo: TipoMovimiento.ENTRADA,
+      origen: OrigenMovimiento.COMPRA,
+      cantidad: linea.cantidad,
+      stockAnterior,
+      stockPosterior,
+      documentoOrigenId: compraId,
+      tipoDocumentoOrigen: 'compra',
+      costoUnitario: linea.costoUnitario,
+      costoTotal: Math.round(linea.cantidad * linea.costoUnitario * 100) / 100,
+      notas: `Recepción de compra: ${linea.descripcion}`,
+    });
+  }
+
+  private async recibirCompraEnVariante(
+    manager: EntityManager,
+    empresaId: string,
+    compraId: string,
+    linea: {
+      productoId?: string | null;
+      varianteId?: string | null;
+      cantidad: number;
+      costoUnitario: number;
+      descripcion: string;
+    },
+  ): Promise<void> {
+    const variante = await manager.findOne(ProductoVariante, {
+      // La variante no tiene empresa propia: se valida a través de su producto.
+      where: { id: linea.varianteId!, producto: { empresaId } },
+    });
+    if (!variante) {
+      throw new NotFoundException(`Variante ${linea.varianteId} no encontrada en este negocio`);
+    }
+
+    const stockAnterior = variante.stock;
+    const stockPosterior = stockAnterior + linea.cantidad;
+    variante.stock = stockPosterior;
+    variante.costo = linea.costoUnitario; // política de último costo
+    await manager.save(variante);
+    await this.sincronizarStockDeProducto(variante.productoId, manager);
+
+    await this.registrarMovimientoCon(manager, {
+      empresaId,
+      productoId: variante.productoId,
+      varianteId: variante.id,
+      tipo: TipoMovimiento.ENTRADA,
+      origen: OrigenMovimiento.COMPRA,
+      cantidad: linea.cantidad,
+      stockAnterior,
+      stockPosterior,
+      documentoOrigenId: compraId,
+      tipoDocumentoOrigen: 'compra',
+      costoUnitario: linea.costoUnitario,
+      costoTotal: Math.round(linea.cantidad * linea.costoUnitario * 100) / 100,
+      notas: `Recepción de compra: ${linea.descripcion}`,
+    });
+  }
+
+  /** El stock del producto padre con variantes es la suma de sus variantes. */
+  private async sincronizarStockDeProducto(productoId: string, manager: EntityManager): Promise<void> {
+    const resultado = await manager
+      .createQueryBuilder(ProductoVariante, 'variante')
+      .select('COALESCE(SUM(variante.stock), 0)', 'suma')
+      .where('variante.productoId = :productoId', { productoId })
+      .getRawOne<{ suma: string }>();
+    await manager.update(Producto, productoId, { stock: Number(resultado?.suma ?? 0) });
   }
 
   async obtenerMovimientos(empresaId: string, filtro: any = {}): Promise<{ data: MovimientoInventario[]; total: number }> {

@@ -15,15 +15,29 @@ import type { CuentaFinanciera } from '../../cajas/entities/cuenta-financiera.en
 import { CuentaFinanciera as CuentaFinancieraClass } from '../../cajas/entities/cuenta-financiera.entity.js';
 import type { DetalleAsiento } from './detalle-asiento.entity.js';
 import { DetalleAsiento as DetalleAsientoClass } from './detalle-asiento.entity.js';
+import { Empresa } from '../../empresa/entities/empresa.entity.js';
 
 @Entity('plan_de_cuentas')
+// El código solo es único dentro de un mismo negocio: cada empresa tiene su plan.
+@Index(['empresaId', 'codigo'], { unique: true })
+@Index(['empresaId'])
 export class PlanDeCuenta {
   @ApiProperty({ description: 'Identificador único de la cuenta contable', example: 'uuid-v4' })
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @ApiProperty({
+    description: 'Negocio/empresa a la que pertenece esta cuenta (aislamiento multi-tenant)',
+    example: 'uuid-v4',
+  })
+  @Column({ type: 'uuid', name: 'empresa_id' })
+  empresaId: string;
+
+  @ManyToOne(() => Empresa, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'empresa_id' })
+  empresa: Empresa;
+
   @ApiProperty({ description: 'Nomenclatura contable única', example: '1.1.1.01' })
-  @Index({ unique: true })
   @Column({ type: 'varchar', length: 20, name: 'codigo' })
   codigo: string;
 

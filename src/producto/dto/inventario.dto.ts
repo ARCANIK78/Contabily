@@ -1,6 +1,6 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, IsEnum, IsArray, ValidateNested, IsUUID, Min, Max, IsUrl, MinLength, MaxLength, IsDateString } from 'class-validator';
-import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, IsNumber, IsBoolean, IsEnum, IsArray, ValidateNested, IsUUID, Min, Max, MinLength, MaxLength, IsDateString } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ApiProperty } from '@nestjs/swagger';
 import { TipoMovimiento, OrigenMovimiento } from '../entities/movimiento-inventario.entity.js';
 
 export class CrearMovimientoInventarioDto {
@@ -141,10 +141,12 @@ export class ResumenInventarioDto {
   categoriaId?: string;
 
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   soloStockBajo?: boolean;
 
   @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   soloSinStock?: boolean;
 

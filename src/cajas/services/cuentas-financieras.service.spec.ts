@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 
 import { CuentasFinancierasService } from './cuentas-financieras.service.js';
-import { CuentaFinanciera, TipoCuentaFinanciera } from '../entities/cuenta-financiera.entity.js';
+import { TipoCuentaFinanciera } from '../entities/cuenta-financiera.entity.js';
+
+const EMPRESA = 'empresa-uuid-1';
+const OTRA_EMPRESA = 'empresa-uuid-2';
 
 type MockManager = {
   create: ReturnType<typeof vi.fn>;
@@ -12,7 +15,7 @@ type MockManager = {
 describe('CuentasFinancierasService', () => {
   let service: CuentasFinancierasService;
   let manager: MockManager;
-  let repo: { count: ReturnType<typeof vi.fn> };
+  let repo: { count: ReturnType<typeof vi.fn>; find: ReturnType<typeof vi.fn> };
   let planCuentasService: { obtenerCuentaPorId: ReturnType<typeof vi.fn> };
   let dataSource: { transaction: ReturnType<typeof vi.fn> };
   let asientosService: { crearAsiento: ReturnType<typeof vi.fn> };
@@ -23,9 +26,15 @@ describe('CuentasFinancierasService', () => {
       create: vi.fn((_, datos) => datos),
       save: vi.fn((entidad) => Promise.resolve({ id: 'cf-1', ...entidad })),
     };
-    repo = { count: vi.fn().mockResolvedValue(0) };
+    repo = { count: vi.fn().mockResolvedValue(0), find: vi.fn().mockResolvedValue([]) };
     planCuentasService = {
-      obtenerCuentaPorId: vi.fn(async (id: string) => ({ id, codigo: id, esTransaccional: true })),
+      // Firma real: (empresaId, id)
+      obtenerCuentaPorId: vi.fn(async (empresaId: string, id: string) => ({
+        id,
+        codigo: id,
+        esTransaccional: true,
+        empresaId,
+      })),
     };
     dataSource = {
       transaction: vi.fn(async (callback) => callback(manager)),
@@ -47,19 +56,45 @@ describe('CuentasFinancierasService', () => {
   });
 
   it('crea una cuenta sin saldo inicial y sin asiento de apertura', async () => {
-    const cuenta = await service.crearCuentaFinanciera({
+    const cuenta = await service.crearCuentaFinanciera(EMPRESA, {
       nombre: 'Caja Chica',
       tipo: TipoCuentaFinanciera.EFECTIVO,
       cuentaContableId: 'cc-caja',
     });
 
-    expect(cuenta).toMatchObject({ saldo: '0.00', moneda: 'BOB' });
+    expect(cuenta).toMatchObject({ saldo: '0.00', moneda: 'BOB', empresaId: EMPRESA });
     expect(asientosService.crearAsiento).not.toHaveBeenCalled();
+  });
+
+  it('acota la búsqueda de la cuenta contable a la empresa activa', async () => {
+    await service.crearCuentaFinanciera(EMPRESA, {
+      nombre: 'Caja Chica',
+      tipo: TipoCuentaFinanciera.EFECTIVO,
+      cuentaContableId: 'cc-caja',
+    });
+
+    expect(planCuentasService.obtenerCuentaPorId).toHaveBeenCalledWith(EMPRESA, 'cc-caja');
+  });
+
+  it('rechaza usar la cuenta contable de OTRO negocio (404)', async () => {
+    // Así se comporta el PlanCuentasService real: no la encuentra en mi empresa.
+    planCuentasService.obtenerCuentaPorId.mockRejectedValue(
+      new NotFoundException('Cuenta contable cc-ajena no encontrada'),
+    );
+
+    await expect(
+      service.crearCuentaFinanciera(EMPRESA, {
+        nombre: 'Caja',
+        tipo: TipoCuentaFinanciera.EFECTIVO,
+        cuentaContableId: 'cc-ajena',
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('rechaza saldoInicial > 0 sin cuentaAperturaId', async () => {
     await expect(
-      service.crearCuentaFinanciera({
+      service.crearCuentaFinanciera(EMPRESA, {
         nombre: 'Caja Chica',
         tipo: TipoCuentaFinanciera.EFECTIVO,
         cuentaContableId: 'cc-caja',
@@ -70,7 +105,7 @@ describe('CuentasFinancierasService', () => {
   });
 
   it('genera el asiento de apertura (Debe caja / Haber capital)', async () => {
-    const cuenta = await service.crearCuentaFinanciera({
+    const cuenta = await service.crearCuentaFinanciera(EMPRESA, {
       nombre: 'Caja Chica',
       tipo: TipoCuentaFinanciera.EFECTIVO,
       cuentaContableId: 'cc-caja',
@@ -81,6 +116,7 @@ describe('CuentasFinancierasService', () => {
     expect(cuenta).toMatchObject({ saldo: '1000.00' });
     expect(asientosService.crearAsiento).toHaveBeenCalledTimes(1);
     const input = asientosService.crearAsiento.mock.calls[0][1];
+    expect(input.empresaId).toBe(EMPRESA);
     expect(input.glosa).toBe('Apertura de Caja Chica');
     expect(input.detalles).toEqual([
       { cuentaId: 'cc-caja', debe: 1000, haber: 0 },
@@ -92,7 +128,7 @@ describe('CuentasFinancierasService', () => {
     repo.count.mockResolvedValue(1);
 
     await expect(
-      service.crearCuentaFinanciera({
+      service.crearCuentaFinanciera(EMPRESA, {
         nombre: 'Banco',
         tipo: TipoCuentaFinanciera.BANCO,
         cuentaContableId: 'cc-banco',
@@ -100,12 +136,16 @@ describe('CuentasFinancierasService', () => {
         cuentaAperturaId: 'cc-otra-caja',
       }),
     ).rejects.toThrow('vinculada a una caja');
+    // El conteo se limita a la empresa activa
+    expect(repo.count).toHaveBeenCalledWith({
+      where: { cuentaContableId: 'cc-otra-caja', empresaId: EMPRESA },
+    });
     expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('rechaza cuenta de apertura igual a la cuenta de la caja', async () => {
     await expect(
-      service.crearCuentaFinanciera({
+      service.crearCuentaFinanciera(EMPRESA, {
         nombre: 'Caja',
         tipo: TipoCuentaFinanciera.EFECTIVO,
         cuentaContableId: 'cc-caja',
@@ -116,12 +156,15 @@ describe('CuentasFinancierasService', () => {
   });
 
   it('rechaza una cuenta de apertura no transaccional', async () => {
-    planCuentasService.obtenerCuentaPorId.mockImplementation(async (id: string) =>
-      id === 'cc-malo' ? { id, codigo: '3', esTransaccional: false } : { id, codigo: id, esTransaccional: true },
+    planCuentasService.obtenerCuentaPorId.mockImplementation(
+      async (_empresaId: string, id: string) =>
+        id === 'cc-malo'
+          ? { id, codigo: '3', esTransaccional: false }
+          : { id, codigo: id, esTransaccional: true },
     );
 
     await expect(
-      service.crearCuentaFinanciera({
+      service.crearCuentaFinanciera(EMPRESA, {
         nombre: 'Caja',
         tipo: TipoCuentaFinanciera.EFECTIVO,
         cuentaContableId: 'cc-caja',
@@ -139,7 +182,7 @@ describe('CuentasFinancierasService', () => {
     });
 
     await expect(
-      service.crearCuentaFinanciera({
+      service.crearCuentaFinanciera(EMPRESA, {
         nombre: 'Caja',
         tipo: TipoCuentaFinanciera.EFECTIVO,
         cuentaContableId: 'cc-clase',
@@ -151,7 +194,7 @@ describe('CuentasFinancierasService', () => {
     planCuentasService.obtenerCuentaPorId.mockRejectedValue(new NotFoundException('no encontrada'));
 
     await expect(
-      service.crearCuentaFinanciera({
+      service.crearCuentaFinanciera(EMPRESA, {
         nombre: 'Caja',
         tipo: TipoCuentaFinanciera.EFECTIVO,
         cuentaContableId: 'inexistente',
@@ -160,7 +203,7 @@ describe('CuentasFinancierasService', () => {
   });
 
   it('convierte la apertura en USD a BOB con la tasa del día', async () => {
-    await service.crearCuentaFinanciera({
+    await service.crearCuentaFinanciera(EMPRESA, {
       nombre: 'Caja Dolar',
       tipo: TipoCuentaFinanciera.EFECTIVO,
       moneda: 'USD',
@@ -175,5 +218,18 @@ describe('CuentasFinancierasService', () => {
       { cuentaId: 'cc-caja', debe: 1185, haber: 0 },
       { cuentaId: 'cc-capital', debe: 0, haber: 1185 },
     ]);
+  });
+
+  describe('listar / obtener por id', () => {
+    it('lista solo las cuentas financieras de la empresa', async () => {
+      await service.listarCuentasFinancieras(EMPRESA);
+
+      expect(repo.find).toHaveBeenCalledWith({
+        where: { empresaId: EMPRESA },
+        relations: { cuentaContable: true },
+        order: { nombre: 'ASC' },
+      });
+      expect(repo.find.mock.calls[0][0].where.empresaId).not.toBe(OTRA_EMPRESA);
+    });
   });
 });

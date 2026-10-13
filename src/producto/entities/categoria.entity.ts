@@ -9,15 +9,10 @@ import {
   JoinColumn,
   Index,
   Unique,
-  Tree,
-  TreeChildren,
-  TreeParent,
 } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Empresa } from '../../empresa/entities/empresa.entity.js';
 import { Producto } from './producto.entity.js';
-
-@Tree('materialized-path')
 @Entity('categorias')
 @Unique(['empresaId', 'slug'])
 @Index(['empresaId', 'padreId'])
@@ -83,12 +78,13 @@ export class Categoria {
   @JoinColumn({ name: 'empresaId' })
   empresa: Empresa;
 
-  @TreeParent()
+  @Column({ type: 'uuid', nullable: true })
+  padreId: string | null;
+
   @ManyToOne(() => Categoria, (categoria) => categoria.hijos, { onDelete: 'SET NULL' })
   @JoinColumn({ name: 'padreId' })
   padre: Categoria | null;
 
-  @TreeChildren()
   @OneToMany(() => Categoria, (categoria) => categoria.padre)
   hijos: Categoria[];
 
