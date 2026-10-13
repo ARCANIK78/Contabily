@@ -47,7 +47,7 @@ export class CrearModuloComprasYGastos1791700000000 implements MigrationInterfac
     // ---------- Tablas ----------
     await queryRunner.query(`
       CREATE TABLE public.proveedores (
-        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        id uuid DEFAULT uuid_generate_v4() NOT NULL,
         empresa_id uuid NOT NULL,
         nombre character varying(255) NOT NULL,
         rif character varying(50) NOT NULL,
@@ -66,7 +66,7 @@ export class CrearModuloComprasYGastos1791700000000 implements MigrationInterfac
 
     await queryRunner.query(`
       CREATE TABLE public.compras (
-        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        id uuid DEFAULT uuid_generate_v4() NOT NULL,
         empresa_id uuid NOT NULL,
         proveedor_id uuid NOT NULL,
         numero_factura character varying(50) NOT NULL,
@@ -93,7 +93,7 @@ export class CrearModuloComprasYGastos1791700000000 implements MigrationInterfac
 
     await queryRunner.query(`
       CREATE TABLE public.compras_detalles (
-        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        id uuid DEFAULT uuid_generate_v4() NOT NULL,
         compra_id uuid NOT NULL,
         producto_id uuid,
         variante_id uuid,
@@ -107,7 +107,7 @@ export class CrearModuloComprasYGastos1791700000000 implements MigrationInterfac
 
     await queryRunner.query(`
       CREATE TABLE public.compras_pagos (
-        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        id uuid DEFAULT uuid_generate_v4() NOT NULL,
         empresa_id uuid NOT NULL,
         compra_id uuid NOT NULL,
         cuenta_financiera_id uuid NOT NULL,
@@ -125,7 +125,7 @@ export class CrearModuloComprasYGastos1791700000000 implements MigrationInterfac
 
     await queryRunner.query(`
       CREATE TABLE public.categorias_gasto (
-        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        id uuid DEFAULT uuid_generate_v4() NOT NULL,
         empresa_id uuid NOT NULL,
         nombre character varying(100) NOT NULL,
         cuenta_contable_id uuid NOT NULL,
@@ -138,7 +138,7 @@ export class CrearModuloComprasYGastos1791700000000 implements MigrationInterfac
 
     await queryRunner.query(`
       CREATE TABLE public.gastos (
-        id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+        id uuid DEFAULT uuid_generate_v4() NOT NULL,
         empresa_id uuid NOT NULL,
         categoria_id uuid NOT NULL,
         cuenta_financiera_id uuid NOT NULL,

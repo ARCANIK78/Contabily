@@ -1,0 +1,22 @@
+# No mandar nada al contexto de build: alarga el build y en el caso del .env
+# es un riesgo de verdad (credenciales locales dentro de la imagen).
+node_modules
+dist
+.git
+coverage
+.vite
+*.tsbuildinfo
+
+# Credenciales y secretos: la configuración llega por variables de entorno,
+# nunca dentro de la imagen.
+.env
+.env.local
+.env.*.local
+keys
+*.pem
+*.log
+
+# Infra local, irrelevante para la imagen.
+docker
+test
+.gitignore

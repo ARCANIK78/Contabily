@@ -74,7 +74,9 @@ import { Gasto } from './compras/entities/gasto.entity.js';
         ],
         synchronize: configService.get<boolean>('database.synchronize'),
         logging: configService.get<boolean>('database.logging'),
-        ssl: configService.get<string>('database.host') !== 'localhost' ? { rejectUnauthorized: false } : false,
+        // Misma decisión de TLS que usa el CLI de migraciones (data-source),
+        // para que app y migraciones no diverjan en cómo conectan.
+        ssl: configService.get<boolean | { rejectUnauthorized: boolean }>('database.ssl'),
       }),
       inject: [ConfigService],
     }),

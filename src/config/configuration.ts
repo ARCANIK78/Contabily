@@ -1,11 +1,14 @@
 import { registerAs } from '@nestjs/config';
 
+import { resolverConexion, resolverSsl } from './database-url.js';
+
 export interface DatabaseConfig {
   host: string;
   port: number;
   username: string;
   password: string;
   name: string;
+  ssl: false | { rejectUnauthorized: boolean };
   synchronize: boolean;
   logging: boolean;
 }
@@ -52,15 +55,22 @@ export interface SecurityConfig {
   };
 }
 
-export const databaseConfig = registerAs('database', (): DatabaseConfig => ({
-  host: process.env.DB_HOST ?? 'localhost',
-  port: parseInt(process.env.DB_PORT ?? '5433', 10),
-  username: process.env.DB_USERNAME ?? 'postgres',
-  password: process.env.DB_PASSWORD ?? 'postgres',
-  name: process.env.DB_NAME ?? 'contabily_test',
-  synchronize: process.env.DB_SYNCHRONIZE === 'true',
-  logging: process.env.DB_LOGGING === 'true',
-}));
+/**
+ * Conexión a la base. DATABASE_URL manda si existe (Supabase, Railway, ...);
+ * si no, se usan las variables sueltas de siempre. `DB_SYNCHRONIZE` y
+ * `DB_LOGGING` solo tienen sentido con las variables sueltas: contra un
+ * entorno gestionado la sincronización automática está desactivada a propósito.
+ */
+export const databaseConfig = registerAs('database', (): DatabaseConfig => {
+  const conexion = resolverConexion();
+
+  return {
+    ...conexion,
+    ssl: resolverSsl(conexion.host),
+    synchronize: process.env.DB_SYNCHRONIZE === 'true',
+    logging: process.env.DB_LOGGING === 'true',
+  };
+});
 
 export const jwtConfig = registerAs('jwt', (): JwtConfig => ({
   secret: process.env.JWT_SECRET ?? 'default-secret-change-in-production',

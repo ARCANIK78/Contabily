@@ -16,8 +16,9 @@ async function bootstrap() {
   const frontendUrl = configService.get('app.frontendUrl') ?? 'http://localhost:5173';
   const nodeEnv = configService.get('app.nodeEnv') ?? 'development';
 
-  // Prefijo global para todas las rutas (sin versión)
-  app.setGlobalPrefix('api');
+  // Prefijo global para todas las rutas (sin versión). `health` queda fuera
+  // para que el orquestador tenga una URL estable ajena al versionado del API.
+  app.setGlobalPrefix('api', { exclude: ['health'] });
 
   // Versioning de API
   app.enableVersioning({

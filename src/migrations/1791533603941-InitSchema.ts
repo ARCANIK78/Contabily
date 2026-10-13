@@ -5,6 +5,12 @@ export class InitSchema1791533603941 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
+-- uuid_generate_v4() NO ir calificado con "public.": la extensión no siempre
+-- vive en public. Supabase la preinstala en el schema "extensions", así que
+-- este CREATE EXTENSION resulta en un no-op (IF NOT EXISTS) y la referencia
+-- pública no resolvería: la migración moriría con "function does not exist".
+-- Sin calificar, el search_path la encuentra en ambos entornos
+-- (local "$user", public / Supabase "$user", public, extensions).
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TYPE public.cuentas_financieras_tipo_enum AS ENUM (
     'EFECTIVO',
@@ -26,14 +32,14 @@ CREATE TYPE public.usuarios_roles_enum AS ENUM (
     'contador'
 );
 CREATE TABLE public.asientos_contables (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT uuid_generate_v4() NOT NULL,
     fecha timestamp with time zone NOT NULL,
     glosa text NOT NULL,
     referencia character varying(100),
     creado_en timestamp with time zone DEFAULT now() NOT NULL
 );
 CREATE TABLE public.cuentas_financieras (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT uuid_generate_v4() NOT NULL,
     nombre character varying(255) NOT NULL,
     tipo public.cuentas_financieras_tipo_enum NOT NULL,
     moneda character varying(3) DEFAULT 'BOB'::character varying NOT NULL,
@@ -44,14 +50,14 @@ CREATE TABLE public.cuentas_financieras (
     actualizado_en timestamp with time zone DEFAULT now() NOT NULL
 );
 CREATE TABLE public.detalles_asiento (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT uuid_generate_v4() NOT NULL,
     asiento_id uuid NOT NULL,
     cuenta_id uuid NOT NULL,
     debe numeric(15,2) DEFAULT '0'::numeric NOT NULL,
     haber numeric(15,2) DEFAULT '0'::numeric NOT NULL
 );
 CREATE TABLE public.plan_de_cuentas (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT uuid_generate_v4() NOT NULL,
     codigo character varying(20) NOT NULL,
     nombre character varying(255) NOT NULL,
     cuenta_padre_id uuid,
@@ -60,7 +66,7 @@ CREATE TABLE public.plan_de_cuentas (
     actualizado_en timestamp with time zone DEFAULT now() NOT NULL
 );
 CREATE TABLE public.transacciones (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT uuid_generate_v4() NOT NULL,
     cuenta_financiera_id uuid NOT NULL,
     tipo public.transacciones_tipo_enum NOT NULL,
     monto numeric(15,2) NOT NULL,
@@ -70,7 +76,7 @@ CREATE TABLE public.transacciones (
     fecha_creacion timestamp with time zone DEFAULT now() NOT NULL
 );
 CREATE TABLE public.usuarios (
-    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    id uuid DEFAULT uuid_generate_v4() NOT NULL,
     correo character varying(255) NOT NULL,
     nombre_completo character varying(255),
     url_avatar text,

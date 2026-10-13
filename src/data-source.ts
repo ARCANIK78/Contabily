@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DataSource } from 'typeorm';
 
+import { resolverConexion, resolverSsl } from './config/database-url.js';
+
 import { User } from './auth/entities/user.entity.js';
 import { Empresa } from './empresa/entities/empresa.entity.js';
 import { PlanDeCuenta } from './contabilidad/entities/plan-de-cuenta.entity.js';
@@ -25,6 +27,7 @@ import { Gasto } from './compras/entities/gasto.entity.js';
 import { InitSchema1791533603941 } from './migrations/1791533603941-InitSchema.js';
 import { CrearTiposCambioYConvertirMontos1791534430746 } from './migrations/1791534430746-CrearTiposCambioYConvertirMontos.js';
 import { AgregarTasaAplicadaATransacciones1791536036688 } from './migrations/1791536036688-AgregarTasaAplicadaATransacciones.js';
+import { FaltantesSincronizacionInicial1791590000000 } from './migrations/1791590000000-FaltantesSincronizacionInicial.js';
 import { AgregarEmpresaIdAModulosContables1791604000000 } from './migrations/1791604000000-AgregarEmpresaIdAModulosContables.js';
 import { CrearModuloComprasYGastos1791700000000 } from './migrations/1791700000000-CrearModuloComprasYGastos.js';
 import { AgregarCorrelativoYEstadoAAsientos1791800000000 } from './migrations/1791800000000-AgregarCorrelativoYEstadoAAsientos.js';
@@ -46,13 +49,17 @@ function cargarEnv(): void {
 
 cargarEnv();
 
+// DATABASE_URL si existe (Supabase, Railway...), si no las variables sueltas.
+const { name: database, ...conexion } = resolverConexion();
+
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST ?? 'localhost',
-  port: Number(process.env.DB_PORT ?? 5433),
-  username: process.env.DB_USERNAME ?? 'postgres',
-  password: process.env.DB_PASSWORD ?? 'postgres',
-  database: process.env.DB_NAME ?? 'contabily_test',
+  ...conexion,
+  database,
+  // TLS hacia el servidor. Sin esto el CLI de migraciones muere en el
+  // handshake contra Supabase, aunque la aplicación sí arranque: aquí es
+  // donde más duele olvidarlo. Ver resolverSsl para el override con DB_SSL.
+  ssl: resolverSsl(conexion.host),
   entities: [
     User,
     Empresa,
@@ -78,6 +85,9 @@ export const AppDataSource = new DataSource({
     InitSchema1791533603941,
     CrearTiposCambioYConvertirMontos1791534430746,
     AgregarTasaAplicadaATransacciones1791536036688,
+    // Va aquí por timestamp: debe correr antes de las dos siguientes, que
+    // referencian empresas, productos y producto_variantes.
+    FaltantesSincronizacionInicial1791590000000,
     AgregarEmpresaIdAModulosContables1791604000000,
     CrearModuloComprasYGastos1791700000000,
     AgregarCorrelativoYEstadoAAsientos1791800000000,
